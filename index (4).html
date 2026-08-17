@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>お客様作業日報アプリ</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1d2733;--muted:#667085;--line:#d0d5dd;--accent:#1f6feb;--accent2:#eaf2ff;--ok:#137333}
+*{box-sizing:border-box} body{margin:0;font-family:"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
+header{position:sticky;top:0;z-index:20;background:#111827;color:white;padding:14px 22px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px #0002}
+header h1{font-size:19px;margin:0} header small{color:#cbd5e1}
+.wrap{max-width:1180px;margin:24px auto;padding:0 16px 60px}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px}
+.step{background:white;border:1px solid var(--line);padding:10px;border-radius:10px;text-align:center;font-size:13px}.step.active{border-color:var(--accent);background:var(--accent2);font-weight:700}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 2px 8px #00000008}
+.panel h2{font-size:18px;margin:0 0 12px}.panel p{margin:6px 0;color:var(--muted)}
+.drop{border:2px dashed #98a2b3;border-radius:14px;padding:34px 18px;text-align:center;background:#fafafa;cursor:pointer;transition:.2s}
+.drop.drag{border-color:var(--accent);background:var(--accent2)}.drop b{display:block;font-size:18px;margin-bottom:6px}
+input[type=file]{display:none}.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+button{border:0;border-radius:9px;padding:11px 16px;font-weight:700;cursor:pointer;background:#e5e7eb;color:#111827}
+button.primary{background:var(--accent);color:white}button.success{background:var(--ok);color:white}button.danger{background:#b42318;color:white}
+button:disabled{opacity:.45;cursor:not-allowed}
+.report-list{display:grid;gap:10px;margin-top:14px}.report-card{border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff;display:grid;grid-template-columns:1fr auto;gap:8px}
+.report-card .meta{font-size:13px;color:var(--muted)}.pill{display:inline-block;background:#eef2f6;border-radius:999px;padding:3px 8px;font-size:12px;margin:2px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field label{display:block;font-size:12px;font-weight:700;color:#475467;margin-bottom:5px}
+.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;background:white}.field textarea{min-height:92px;resize:vertical}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:12px}
+.photo-card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:white}.photo-card img{width:100%;height:150px;object-fit:cover;display:block;background:#eee}.photo-card .cap{padding:8px;font-size:12px}.photo-card.selected{outline:3px solid var(--accent)}
+.hidden{display:none!important}
+.status{font-size:13px;padding:8px 10px;border-radius:8px;background:#f2f4f7;margin-top:10px}.status.ok{background:#ecfdf3;color:#027a48}.status.err{background:#fef3f2;color:#b42318}
+#sheetWrap{overflow:auto;background:#d7dbe0;padding:18px;border-radius:12px}
+.sheet{width:794px;min-height:1123px;background:white;margin:auto;padding:40px 42px 34px;box-shadow:0 4px 18px #0002;color:#111}
+.sheet h1{text-align:center;font-size:28px;letter-spacing:.35em;margin:0 0 24px}.tbl{width:100%;border-collapse:collapse;margin-bottom:14px}.tbl td{border:1px solid #777;padding:8px;font-size:13px;vertical-align:top}.tbl .th{background:#eef1f4;font-weight:700;width:105px}.sec-title{font-weight:800;font-size:15px;margin:15px 0 6px}
+.photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.out-photo{border:1px solid #888}.out-photo img{display:block;width:100%;height:225px;object-fit:cover}.out-photo .txt{padding:7px;font-size:12px;border-top:1px solid #aaa;min-height:52px}
+.notice{font-size:12px;color:var(--muted);margin-top:8px}
+@media(max-width:780px){.steps{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.sheet{transform-origin:top left}}
+@media print{body{background:white}header,.wrap> :not(#previewPanel){display:none!important}#previewPanel{display:block!important;border:0;padding:0;margin:0;box-shadow:none}#sheetWrap{padding:0;background:white}.sheet{box-shadow:none;margin:0;width:210mm;min-height:297mm;padding:11mm}}
+</style>
+</head>
+<body>
+<header><div><h1>お客様作業日報アプリ</h1><small>個別作業日報PDF → お客様提出用日報</small></div><div id="topStatus">未取込</div></header>
+<div class="wrap">
+  <div class="steps">
+    <div class="step active">1. 個別日報PDF取込</div><div class="step">2. 内容を自動集約</div><div class="step">3. 写真・内容確認</div><div class="step">4. PDF出力</div>
+  </div>
+
+  <section class="panel">
+    <h2>個別作業日報PDFを取り込む</h2>
+    <p>同じ現場・同じ日のPDFを複数まとめて選択できます。</p>
+    <label class="drop" id="drop">
+      <b>PDFをここへドラッグ＆ドロップ</b>
+      またはクリックしてファイルを選択
+      <input id="files" type="file" accept="application/pdf" multiple>
+    </label>
+    <div id="status" class="status">PDFを選択してください。</div>
+    <div id="reportList" class="report-list"></div>
+    <div class="btns"><button class="primary" id="aggregate" disabled>お客様日報を作成</button><button id="clear">すべて削除</button></div>
+  </section>
+
+  <section class="panel hidden" id="editor">
+    <h2>お客様日報の内容確認</h2>
+    <p>自動でまとめた内容です。提出前に自由に修正できます。</p>
+    <div class="grid2">
+      <div class="field"><label>工事名</label><input id="construction"></div>
+      <div class="field"><label>現場名</label><input id="site"></div>
+      <div class="field"><label>作業日</label><input id="date"></div>
+      <div class="field"><label>天候</label><input id="weather"></div>
+      <div class="field"><label>施工会社</label><input id="company"></div>
+      <div class="field"><label>本日の作業人員</label><input id="workers"></div>
+    </div>
+    <div class="field" style="margin-top:12px"><label>作業箇所</label><input id="place"></div>
+    <div class="field" style="margin-top:12px"><label>本日の作業内容</label><textarea id="work"></textarea></div>
+    <div class="field" style="margin-top:12px"><label>特記事項</label><textarea id="notes"></textarea></div>
+    <div class="field" style="margin-top:12px"><label>明日の作業予定</label><textarea id="tomorrow"></textarea></div>
+
+    <h2 style="margin-top:22px">掲載する作業写真</h2>
+    <p>個別日報から写真候補を切り出します。クリックした写真だけお客様用に掲載します。</p>
+    <div class="photos" id="photos"></div>
+    <div class="notice">※ 個別作業日報の写真レイアウトを前提に自動切り出しします。うまく切り出せない場合は、その写真を外して他の写真を選択してください。</div>
+    <div class="btns"><button class="primary" id="makePreview">プレビュー更新</button></div>
+  </section>
+
+  <section class="panel hidden" id="previewPanel">
+    <h2>お客様提出用 作業日報</h2>
+    <div id="sheetWrap">
+      <div class="sheet" id="sheet">
+        <h1>作 業 日 報</h1>
+        <table class="tbl">
+          <tr><td class="th">工事名</td><td id="oConstruction"></td><td class="th">作業日</td><td id="oDate"></td></tr>
+          <tr><td class="th">現場名</td><td id="oSite"></td><td class="th">天候</td><td id="oWeather"></td></tr>
+          <tr><td class="th">施工会社</td><td colspan="3" id="oCompany"></td></tr>
+        </table>
+        <div class="sec-title">1．本日の作業人員</div>
+        <table class="tbl"><tr><td id="oWorkers" style="text-align:center"></td></tr></table>
+        <div class="sec-title">2．本日の作業</div>
+        <table class="tbl"><tr><td class="th">作業箇所</td><td id="oPlace"></td></tr><tr><td class="th">作業内容</td><td id="oWork" style="white-space:pre-wrap"></td></tr></table>
+        <div class="sec-title">3．作業写真</div>
+        <div class="photo-grid" id="outPhotos"></div>
+        <div class="sec-title">4．特記事項</div>
+        <table class="tbl"><tr><td id="oNotes" style="white-space:pre-wrap;min-height:60px"></td></tr></table>
+        <div class="sec-title">5．明日の作業予定</div>
+        <table class="tbl"><tr><td id="oTomorrow" style="white-space:pre-wrap;min-height:60px"></td></tr></table>
+      </div>
+    </div>
+    <div class="btns"><button class="success" id="downloadPdf">PDFを作成</button><button onclick="window.print()">印刷</button></div>
+  </section>
+</div>
+
+<script type="module">
+import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
+
+const $=id=>document.getElementById(id);
+const state={reports:[],photos:[]};
+const drop=$('drop'), fileInput=$('files');
+
+['dragenter','dragover'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('drag')}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drag')}));
+drop.addEventListener('drop',e=>handleFiles([...e.dataTransfer.files].filter(f=>f.type==='application/pdf')));
+fileInput.addEventListener('change',e=>handleFiles([...e.target.files]));
+
+function clean(s){return (s||'').replace(/\s+/g,' ').trim()}
+function uniqLines(arr){return [...new Set(arr.map(clean).filter(Boolean))]}
+function section(text,label,nextLabels){
+  const idx=text.indexOf(label); if(idx<0)return '';
+  const start=idx+label.length; let end=text.length;
+  for(const n of nextLabels){const j=text.indexOf(n,start); if(j>=0&&j<end)end=j}
+  return clean(text.slice(start,end));
+}
+function parseReport(text,name){
+  const labels=['工種','本日の作業内容','施工数量','進捗・達成状況','使用材料','KY・安全確認','申し送り・共有事項','本日の反省点・改善点','明日の予定','作業写真'];
+  const worker=(text.match(/作業員\s*([^\n]+?)\s*日付/)||[])[1]||name.replace(/^\d{4}-\d{2}-\d{2}_/,'').replace(/_個別作業日報\.pdf$/,'');
+  const date=(text.match(/日付\s*(\d{4}-\d{2}-\d{2})/)||[])[1]||'';
+  const site=(text.match(/現場\s*([^\n]+?)\s*天候/)||[])[1]||'';
+  const weather=(text.match(/天候\s*([^\n]+)/)||[])[1]?.split('勤務')[0]||'';
+  return {
+    name,worker:clean(worker),date:clean(date),site:clean(site),weather:clean(weather),
+    trade:section(text,'工種',labels.slice(1)),
+    work:section(text,'本日の作業内容',labels.slice(2)),
+    progress:section(text,'進捗・達成状況',labels.slice(4)),
+    safety:section(text,'KY・安全確認',labels.slice(6)),
+    handoff:section(text,'申し送り・共有事項',labels.slice(7)),
+    reflection:section(text,'本日の反省点・改善点',labels.slice(8)),
+    tomorrow:section(text,'明日の予定',['作業写真'])
+  }
+}
+async function extractText(pdf){
+  let full='';
+  for(let i=1;i<=pdf.numPages;i++){
+    const page=await pdf.getPage(i), tc=await page.getTextContent();
+    full += tc.items.map(x=>x.str).join(' ')+'\n';
+  }
+  return full;
+}
+async function cropPhotos(pdf,reportIndex){
+  const out=[];
+  for(let i=1;i<=pdf.numPages;i++){
+    const page=await pdf.getPage(i);
+    const tc=await page.getTextContent();
+    const pageText=tc.items.map(x=>x.str).join(' ');
+    if(!pageText.includes('作業写真')) continue;
+    const vp=page.getViewport({scale:1.6});
+    const c=document.createElement('canvas'); c.width=vp.width;c.height=vp.height;
+    await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+    // Current individual-report template: 2x2 image grid beneath "作業写真".
+    const rects=[
+      [.077,.287,.468,.494],[.532,.287,.923,.494],
+      [.077,.566,.468,.773],[.532,.566,.923,.773]
+    ];
+    rects.forEach((r,k)=>{
+      const x=r[0]*c.width,y=r[1]*c.height,w=(r[2]-r[0])*c.width,h=(r[3]-r[1])*c.height;
+      const cc=document.createElement('canvas');cc.width=Math.round(w);cc.height=Math.round(h);
+      cc.getContext('2d').drawImage(c,x,y,w,h,0,0,w,h);
+      out.push({id:`${reportIndex}-${i}-${k}`,src:cc.toDataURL('image/jpeg',.82),selected:k<2,caption:`写真${k+1}`});
+    });
+  }
+  return out;
+}
+async function handleFiles(files){
+  if(!files.length)return;
+  $('status').textContent=`${files.length}件を読み取り中...`;
+  for(const f of files){
+    try{
+      const buf=await f.arrayBuffer();
+      const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      const txt=await extractText(pdf);
+      const report=parseReport(txt,f.name);
+      const idx=state.reports.length;
+      state.reports.push(report);
+      state.photos.push(...await cropPhotos(pdf,idx));
+    }catch(e){console.error(e);$('status').className='status err';$('status').textContent=`読み取り失敗: ${f.name}`;}
+  }
+  renderReports();renderPhotos();
+  $('aggregate').disabled=!state.reports.length;
+  $('status').className='status ok';$('status').textContent=`${state.reports.length}件の個別日報を取り込みました。`;
+  $('topStatus').textContent=`${state.reports.length}件取込済み`;
+}
+function renderReports(){
+  $('reportList').innerHTML=state.reports.map((r,i)=>`<div class="report-card"><div><b>${r.worker||'作業員不明'}</b><div class="meta">${r.date||'-'} / ${r.site||'現場不明'}</div><div><span class="pill">${r.trade||'工種未取得'}</span></div></div><button data-i="${i}" class="remove">削除</button></div>`).join('');
+  document.querySelectorAll('.remove').forEach(b=>b.onclick=()=>{state.reports.splice(+b.dataset.i,1);state.photos=state.photos.filter(p=>!p.id.startsWith(b.dataset.i+'-'));renderReports();renderPhotos();$('aggregate').disabled=!state.reports.length});
+}
+function renderPhotos(){
+  $('photos').innerHTML=state.photos.map((p,i)=>`<div class="photo-card ${p.selected?'selected':''}" data-i="${i}"><img src="${p.src}"><div class="cap"><label><input type="checkbox" ${p.selected?'checked':''}> 掲載する</label><input class="pcap" value="${p.caption}" style="width:100%;margin-top:6px"></div></div>`).join('');
+  document.querySelectorAll('.photo-card').forEach(card=>{
+    const i=+card.dataset.i,cb=card.querySelector('input[type=checkbox]'),cap=card.querySelector('.pcap');
+    cb.onchange=()=>{state.photos[i].selected=cb.checked;card.classList.toggle('selected',cb.checked)};
+    cap.oninput=()=>state.photos[i].caption=cap.value;
+  });
+}
+$('aggregate').onclick=()=>{
+  const rs=state.reports;
+  $('site').value=uniqLines(rs.map(r=>r.site))[0]||'';
+  $('date').value=uniqLines(rs.map(r=>r.date))[0]||'';
+  $('weather').value=uniqLines(rs.map(r=>r.weather)).join(' / ');
+  $('workers').value=`合計 ${rs.length}名（${uniqLines(rs.map(r=>r.worker)).join('、')}）`;
+  $('work').value=uniqLines(rs.flatMap(r=>[r.work,r.progress]).filter(Boolean)).join('\n');
+  $('notes').value=uniqLines(rs.flatMap(r=>[r.handoff].filter(x=>x&&x!=='-'))).join('\n');
+  $('tomorrow').value=uniqLines(rs.map(r=>r.tomorrow)).join('\n');
+  $('editor').classList.remove('hidden'); $('previewPanel').classList.remove('hidden');
+  updatePreview();$('editor').scrollIntoView({behavior:'smooth'});
+}
+function esc(s){return (s||'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
+function updatePreview(){
+  const map={oConstruction:'construction',oSite:'site',oDate:'date',oWeather:'weather',oCompany:'company',oWorkers:'workers',oPlace:'place',oWork:'work',oNotes:'notes',oTomorrow:'tomorrow'};
+  Object.entries(map).forEach(([o,i])=>$(o).textContent=$(i).value||'');
+  const selected=state.photos.filter(p=>p.selected).slice(0,6);
+  $('outPhotos').innerHTML=selected.length?selected.map(p=>`<div class="out-photo"><img src="${p.src}"><div class="txt">${esc(p.caption)}</div></div>`).join(''):'<div style="font-size:12px;color:#667085">掲載写真なし</div>';
+}
+$('makePreview').onclick=()=>{updatePreview();$('previewPanel').scrollIntoView({behavior:'smooth'})};
+$('clear').onclick=()=>{state.reports=[];state.photos=[];renderReports();renderPhotos();$('aggregate').disabled=true;$('editor').classList.add('hidden');$('previewPanel').classList.add('hidden');$('status').className='status';$('status').textContent='PDFを選択してください。';$('topStatus').textContent='未取込';fileInput.value=''};
+$('downloadPdf').onclick=async()=>{
+  updatePreview();
+  const btn=$('downloadPdf');btn.disabled=true;btn.textContent='PDF作成中...';
+  try{
+    const canvas=await html2canvas($('sheet'),{scale:2,useCORS:true,backgroundColor:'#fff'});
+    const img=canvas.toDataURL('image/jpeg',.92);
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({orientation:'p',unit:'mm',format:'a4',compress:true});
+    const pw=210,ph=297; const ratio=Math.min(pw/canvas.width,ph/canvas.height);
+    // Fit one A4 page. The report sheet is designed to fit A4.
+    pdf.addImage(img,'JPEG',0,0,pw,ph,undefined,'FAST');
+    const d=$('date').value||'日付未設定',s=$('site').value||'現場';
+    pdf.save(`${d}_${s}_お客様作業日報.pdf`);
+  }finally{btn.disabled=false;btn.textContent='PDFを作成'}
+};
+</script>
+</body>
+</html>
