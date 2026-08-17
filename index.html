@@ -131,27 +131,88 @@ function section(text,label,nextLabels){
   return clean(text.slice(start,end));
 }
 function parseReport(text,name){
+  const lines=text.split(/\r?\n/).map(clean).filter(Boolean);
   const labels=['工種','本日の作業内容','施工数量','進捗・達成状況','使用材料','KY・安全確認','申し送り・共有事項','本日の反省点・改善点','明日の予定','作業写真'];
-  const worker=(text.match(/作業員\s*([^\n]+?)\s*日付/)||[])[1]||name.replace(/^\d{4}-\d{2}-\d{2}_/,'').replace(/_個別作業日報\.pdf$/,'');
-  const date=(text.match(/日付\s*(\d{4}-\d{2}-\d{2})/)||[])[1]||'';
-  const site=(text.match(/現場\s*([^\n]+?)\s*天候/)||[])[1]||'';
-  const weather=(text.match(/天候\s*([^\n]+)/)||[])[1]?.split('勤務')[0]||'';
-  return {
-    name,worker:clean(worker),date:clean(date),site:clean(site),weather:clean(weather),
-    trade:section(text,'工種',labels.slice(1)),
-    work:section(text,'本日の作業内容',labels.slice(2)),
-    progress:section(text,'進捗・達成状況',labels.slice(4)),
-    safety:section(text,'KY・安全確認',labels.slice(6)),
-    handoff:section(text,'申し送り・共有事項',labels.slice(7)),
-    reflection:section(text,'本日の反省点・改善点',labels.slice(8)),
-    tomorrow:section(text,'明日の予定',['作業写真'])
+
+  const valueAfterPrefix=(prefix)=>{
+    const line=lines.find(l=>l.startsWith(prefix));
+    return line ? clean(line.slice(prefix.length)) : '';
+  };
+
+  const betweenLabels=(label,nextLabels)=>{
+    const idx=lines.findIndex(l=>l===label || l.startsWith(label+' '));
+    if(idx<0)return '';
+    const vals=[];
+    // If label and value are on the same line, keep the tail.
+    const first=clean(lines[idx].slice(label.length));
+    if(first) vals.push(first);
+
+    for(let i=idx+1;i<lines.length;i++){
+      if(nextLabels.some(n=>lines[i]===n || lines[i].startsWith(n+' '))) break;
+      // Browser print footer / app footer are not report content.
+      if(/^個別作業日報アプリ$/.test(lines[i])) break;
+      if(/^about:blank$/.test(lines[i])) break;
+      if(/^\d+\/\d+$/.test(lines[i])) break;
+      if(/^\d{4}\/\d{2}\/\d{2}\s+\d{1,2}:\d{2}$/.test(lines[i])) break;
+      vals.push(lines[i]);
+    }
+    return clean(vals.join(' '));
+  };
+
+  let worker=valueAfterPrefix('作業員');
+  if(!worker){
+    worker=name.replace(/^\d{4}-\d{2}-\d{2}_/,'').replace(/_個別作業日報\.pdf$/,'');
   }
+
+  return {
+    name,
+    worker:clean(worker),
+    date:valueAfterPrefix('日付'),
+    site:valueAfterPrefix('現場'),
+    weather:valueAfterPrefix('天候'),
+    trade:betweenLabels('工種',labels.slice(1)),
+    work:betweenLabels('本日の作業内容',labels.slice(2)),
+    progress:betweenLabels('進捗・達成状況',labels.slice(4)),
+    safety:betweenLabels('KY・安全確認',labels.slice(6)),
+    handoff:betweenLabels('申し送り・共有事項',labels.slice(7)),
+    reflection:betweenLabels('本日の反省点・改善点',labels.slice(8)),
+    tomorrow:betweenLabels('明日の予定',['作業写真'])
+  };
 }
 async function extractText(pdf){
   let full='';
   for(let i=1;i<=pdf.numPages;i++){
-    const page=await pdf.getPage(i), tc=await page.getTextContent();
-    full += tc.items.map(x=>x.str).join(' ')+'\n';
+    const page=await pdf.getPage(i);
+    const tc=await page.getTextContent();
+
+    // PDF.js の文字をY座標ごとにまとめ、元PDFの「行」を復元する。
+    // 以前は全てを半角スペースで連結していたため、
+    // 「作業員」「日付」「現場」「天候」などの境界が消えていた。
+    const items=tc.items
+      .filter(x=>x.str && x.str.trim())
+      .map(x=>({text:x.str, x:x.transform[4], y:x.transform[5]}))
+      .sort((a,b)=>{
+        if(Math.abs(a.y-b.y)>2.5) return b.y-a.y;
+        return a.x-b.x;
+      });
+
+    const lines=[];
+    for(const it of items){
+      let line=lines.find(l=>Math.abs(l.y-it.y)<=2.5);
+      if(!line){
+        line={y:it.y,parts:[]};
+        lines.push(line);
+      }
+      line.parts.push(it);
+    }
+
+    lines.sort((a,b)=>b.y-a.y);
+    const pageText=lines.map(line=>{
+      line.parts.sort((a,b)=>a.x-b.x);
+      return line.parts.map(p=>p.text).join(' ').replace(/\s+/g,' ').trim();
+    }).filter(Boolean).join('\\n');
+
+    full += pageText+'\\n';
   }
   return full;
 }
@@ -199,7 +260,7 @@ async function handleFiles(files){
   $('topStatus').textContent=`${state.reports.length}件取込済み`;
 }
 function renderReports(){
-  $('reportList').innerHTML=state.reports.map((r,i)=>`<div class="report-card"><div><b>${r.worker||'作業員不明'}</b><div class="meta">${r.date||'-'} / ${r.site||'現場不明'}</div><div><span class="pill">${r.trade||'工種未取得'}</span></div></div><button data-i="${i}" class="remove">削除</button></div>`).join('');
+  $('reportList').innerHTML=state.reports.map((r,i)=>`<div class="report-card"><div><b>${r.worker||'作業員不明'}</b><div class="meta">${r.date||'日付未取得'} / ${r.site||'現場未取得'} / ${r.weather||'天候未取得'}</div><div><span class="pill">${r.trade||'工種未取得'}</span></div></div><button data-i="${i}" class="remove">削除</button></div>`).join('');
   document.querySelectorAll('.remove').forEach(b=>b.onclick=()=>{state.reports.splice(+b.dataset.i,1);state.photos=state.photos.filter(p=>!p.id.startsWith(b.dataset.i+'-'));renderReports();renderPhotos();$('aggregate').disabled=!state.reports.length});
 }
 function renderPhotos(){
@@ -216,8 +277,13 @@ $('aggregate').onclick=()=>{
   $('date').value=uniqLines(rs.map(r=>r.date))[0]||'';
   $('weather').value=uniqLines(rs.map(r=>r.weather)).join(' / ');
   $('workers').value=`合計 ${rs.length}名（${uniqLines(rs.map(r=>r.worker)).join('、')}）`;
-  $('work').value=uniqLines(rs.flatMap(r=>[r.work,r.progress]).filter(Boolean)).join('\n');
-  $('notes').value=uniqLines(rs.flatMap(r=>[r.handoff].filter(x=>x&&x!=='-'))).join('\n');
+  $('work').value=uniqLines(rs.map(r=>r.work).filter(Boolean)).join('\n');
+  $('notes').value=uniqLines(rs.flatMap(r=>{
+    const out=[];
+    if(r.progress) out.push(r.progress);
+    if(r.handoff && r.handoff!=='-') out.push(r.handoff);
+    return out;
+  })).join('\n');
   $('tomorrow').value=uniqLines(rs.map(r=>r.tomorrow)).join('\n');
   $('editor').classList.remove('hidden'); $('previewPanel').classList.remove('hidden');
   updatePreview();$('editor').scrollIntoView({behavior:'smooth'});
